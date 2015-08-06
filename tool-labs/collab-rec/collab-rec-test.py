@@ -123,57 +123,45 @@ def main():
     #            'Ranger Steve', 'MisterBee1966']
 
     # members = ['XavierItzm']
-    
+
+    # Store namespaces as a list of str
     namespaces_list = args.namespaces.split(',')
-    namespaces_list = list(map(int, namespaces_list))
     
-    get_contribs_query = '''SELECT rev_id, page_title
+    get_contribs_query = '''SELECT rev_id, page_id
     FROM page JOIN revision_userindex
     ON page_id=rev_page
-    WHERE rev_minor_edit=0
+    WHERE page_namespace IN ({namespaces})
+    AND rev_minor_edit=0
     AND rev_deleted=0
     AND rev_user_text=%(username)s
     ORDER BY rev_id DESC
     LIMIT %(k)s
-    '''
-
+    '''.format(namespaces=",".join(namespaces_list))
     ## Probably set k to 500, and remember to use cursor.fetchall()
-    
-    dbconn = None
-    dbcursor = None
-    
-    (dbconn, dbcursor) = db.connect(dbhost='c3.labsdb')
     
     for member in members:
     
         contribs = set()
-    
+
         try:
+            ## Note: connecting and disconnecting to prevent the DB
+            ## from disconnecting us due to inactivity
+            (dbconn, dbcursor) = db.connect(dbhost='c3.labsdb')
             dbcursor.execute(get_contribs_query,
                              {'username': member,
                               'k': 500})
+            for row in dbcursor.fetchall():
+                try:
+                    contribs.add(row['page_id'])
+                    if len(contribs) == 128:
+                        break
+                except AttributeError:
+                    continue
+            db.disconnect(dbconn, dbcursor)
         except MySQLdb.Error as e:
             logging.error("unable to execute query to get users by article")
             logging.error("Error {0}: {1}".format(e.args[0], e.args[1]))
             return(False)
-            
-        for row in dbcursor.fetchall():
-            try:
-                contribs.add(row['page_title'].decode())
-                if len(contribs) == 128:
-                    break
-            except AttributeError:
-                continue
-
-        ## TODO: Switch to database contributions
-            
-        '''user = pywikibot.User(site, member)
-        contribs = set()
-        for (page, revid, time, comment) in user.contributions(500,
-                                                               namespaces = namespaces_list):
-            contribs.add(page.title())	
-            if len(contribs) == 128:
-                break'''
 
         # Calculate the cutoff date
         cutoff = datetime.now() - timedelta(days=args.cutoff*30)
@@ -182,12 +170,12 @@ def main():
                                         nrecs=args.nrecs, backoff=1, test=args.test)
         match_set = set([rec['item'] for rec in matches])
         overlap = match_set & all_members
-        for user in overlap:
-            print(user)
-            for data in matches:
-                if data['item'] == user:
-                    print(data['overlap'])
-                    break
+        # for user in overlap:
+        #     print(user)
+        #     for data in matches:
+        #         if data['item'] == user:
+        #             print(data['overlap'])
+        #             break
         
         total_recs += len(match_set)
         total_overlap += len(overlap)
@@ -211,7 +199,5 @@ def main():
             int_p=100*float(total_overlap)/float(total_recs)))
     print('Recommendation test complete')
     
-    db.disconnect(self.dbconn, self.dbcursor)
-	
 if __name__ == "__main__":
     main()
